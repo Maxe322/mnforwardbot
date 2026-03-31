@@ -76,7 +76,7 @@ def _extract_media_items(message: Message) -> list[MediaItem]:
                 kind=MediaKind.VIDEO,
                 file_id=message.video.file_id,
                 has_spoiler=bool(getattr(message, "has_media_spoiler", False)),
-                supports_streaming=bool(message.video.supports_streaming),
+                supports_streaming=bool(getattr(message.video, "supports_streaming", False)),
             )
         ]
 
@@ -129,4 +129,3 @@ def _extract_source_title(message: Message) -> str | None:
         return full_name or getattr(sender_user, "username", None)
 
     return None
-
