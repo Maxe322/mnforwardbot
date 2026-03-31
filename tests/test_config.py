@@ -13,6 +13,7 @@ def clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "LLM_API_KEY",
         "LLM_BASE_URL",
         "LLM_MODEL",
+        "LLM_DISABLE_THINKING",
         "LLM_TIMEOUT_SECONDS",
         "LOG_LEVEL",
         "ALBUM_COLLECT_WINDOW_SECONDS",
@@ -40,6 +41,26 @@ def test_load_settings_reads_required_values(monkeypatch: pytest.MonkeyPatch, tm
     assert settings.telegram_bot_token == "token"
     assert settings.allowed_user_ids == frozenset({1, 2})
     assert settings.llm_model == "model"
+    assert settings.llm_disable_thinking is False
+
+
+def test_load_settings_defaults_moonshot_kimi_to_thinking_disabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    prompts_dir = tmp_path / "prompts"
+    prompts_dir.mkdir()
+    (prompts_dir / "style_rules.md").write_text("rules", encoding="utf-8")
+    (prompts_dir / "style_examples.md").write_text("examples", encoding="utf-8")
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("ALLOWED_USER_IDS", "1")
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setenv("LLM_MODEL", "kimi-k2.5")
+    monkeypatch.setenv("LLM_BASE_URL", "https://api.moonshot.ai/v1")
+
+    settings = load_settings(base_dir=tmp_path)
+
+    assert settings.llm_disable_thinking is True
 
 
 def test_load_settings_requires_allowed_user_ids(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

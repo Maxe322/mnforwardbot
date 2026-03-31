@@ -16,6 +16,7 @@ class Settings:
     llm_api_key: str
     llm_base_url: str
     llm_model: str
+    llm_disable_thinking: bool
     llm_timeout_seconds: float
     log_level: str
     album_collect_window_seconds: float
@@ -32,6 +33,10 @@ def load_settings(base_dir: Path | None = None) -> Settings:
     llm_api_key = _require_env("LLM_API_KEY")
     llm_model = _require_env("LLM_MODEL")
     llm_base_url = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+    llm_disable_thinking = _parse_bool(
+        "LLM_DISABLE_THINKING",
+        default=("moonshot.ai" in llm_base_url and llm_model == "kimi-k2.5"),
+    )
     llm_timeout_seconds = _parse_float("LLM_TIMEOUT_SECONDS", 45.0)
     album_collect_window_seconds = _parse_float("ALBUM_COLLECT_WINDOW_SECONDS", 1.2)
     telegram_caption_limit = _parse_int("TELEGRAM_CAPTION_LIMIT", 950)
@@ -47,6 +52,7 @@ def load_settings(base_dir: Path | None = None) -> Settings:
         llm_api_key=llm_api_key,
         llm_base_url=llm_base_url,
         llm_model=llm_model,
+        llm_disable_thinking=llm_disable_thinking,
         llm_timeout_seconds=llm_timeout_seconds,
         log_level=log_level,
         album_collect_window_seconds=album_collect_window_seconds,
@@ -98,3 +104,15 @@ def _parse_int(name: str, default: int) -> int:
     except ValueError as exc:
         raise SettingsError(f"Environment variable {name} must be an integer.") from exc
 
+
+def _parse_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise SettingsError(f"Environment variable {name} must be a boolean value.")

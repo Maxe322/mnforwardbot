@@ -34,6 +34,7 @@ python -m forwardbot.main
 - `LLM_API_KEY`
 - `LLM_BASE_URL`
 - `LLM_MODEL`
+- `LLM_DISABLE_THINKING` (optional, default `true` for Moonshot `kimi-k2.5`)
 - `LLM_TIMEOUT_SECONDS` (optional, default `45`)
 - `LOG_LEVEL` (optional, default `INFO`)
 - `ALBUM_COLLECT_WINDOW_SECONDS` (optional, default `1.2`)
@@ -54,4 +55,3 @@ python -m forwardbot.main
 - The MVP assumes source channels allow normal Telegram forwarding, including media.
 - Media groups are buffered in memory and processed after a short debounce window.
 - The bot returns a draft in the bot chat; it does not publish into the final channel.
-

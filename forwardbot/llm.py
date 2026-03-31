@@ -32,11 +32,13 @@ class OpenAICompatibleProvider:
         api_key: str,
         base_url: str,
         model: str,
+        disable_thinking: bool,
         timeout_seconds: float,
     ) -> None:
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
         self._model = model
+        self._disable_thinking = disable_thinking
         self._client = httpx.AsyncClient(timeout=timeout_seconds)
 
     async def close(self) -> None:
@@ -87,7 +89,10 @@ class OpenAICompatibleProvider:
             raise LLMError(f"AI request failed with status {response.status_code}: {response.text}")
 
         logger.info("LLM rewrite request completed (request_id=%s).", response.headers.get("x-request-id", request_id))
-        return response.json()
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise LLMError(f"AI returned a non-JSON response: {response.text[:500]}") from exc
 
     def _build_payload(
         self,
@@ -99,7 +104,7 @@ class OpenAICompatibleProvider:
         system_prompt = _build_system_prompt(style_context)
         user_prompt = _build_user_prompt(post, max_output_chars=max_output_chars)
 
-        return {
+        payload = {
             "model": self._model,
             "temperature": 0.2,
             "messages": [
@@ -107,6 +112,9 @@ class OpenAICompatibleProvider:
                 {"role": "user", "content": user_prompt},
             ],
         }
+        if self._disable_thinking:
+            payload["thinking"] = {"type": "disabled"}
+        return payload
 
 
 def _build_system_prompt(style_context: StyleContext) -> str:

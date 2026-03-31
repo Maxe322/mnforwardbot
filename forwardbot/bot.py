@@ -26,6 +26,7 @@ class ForwardBotApp:
             api_key=settings.llm_api_key,
             base_url=settings.llm_base_url,
             model=settings.llm_model,
+            disable_thinking=settings.llm_disable_thinking,
             timeout_seconds=settings.llm_timeout_seconds,
         )
         self._style_repository = StyleRepository(
