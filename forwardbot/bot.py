@@ -27,6 +27,7 @@ class ForwardBotApp:
             base_url=settings.llm_base_url,
             model=settings.llm_model,
             disable_thinking=settings.llm_disable_thinking,
+            temperature=settings.llm_temperature,
             timeout_seconds=settings.llm_timeout_seconds,
         )
         self._style_repository = StyleRepository(

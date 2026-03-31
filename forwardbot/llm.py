@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from typing import Any, Protocol
 
@@ -33,12 +34,14 @@ class OpenAICompatibleProvider:
         base_url: str,
         model: str,
         disable_thinking: bool,
+        temperature: float,
         timeout_seconds: float,
     ) -> None:
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
         self._model = model
         self._disable_thinking = disable_thinking
+        self._temperature = temperature
         self._client = httpx.AsyncClient(timeout=timeout_seconds)
 
     async def close(self) -> None:
@@ -59,10 +62,16 @@ class OpenAICompatibleProvider:
         try:
             response_data = await self._post_chat_completion(payload | {"response_format": {"type": "json_object"}})
         except LLMError as exc:
-            if not _looks_like_response_format_issue(exc):
+            retry_temperature = _extract_required_temperature(str(exc))
+            if retry_temperature is not None:
+                logger.warning("Provider rejected temperature %.2f, retrying with required temperature %.2f.", self._temperature, retry_temperature)
+                payload = payload | {"temperature": retry_temperature}
+                response_data = await self._post_chat_completion(payload | {"response_format": {"type": "json_object"}})
+            elif not _looks_like_response_format_issue(exc):
                 raise
-            logger.warning("Provider rejected response_format=json_object, retrying without JSON mode.")
-            response_data = await self._post_chat_completion(payload)
+            else:
+                logger.warning("Provider rejected response_format=json_object, retrying without JSON mode.")
+                response_data = await self._post_chat_completion(payload)
 
         try:
             return _extract_content(response_data)
@@ -106,7 +115,7 @@ class OpenAICompatibleProvider:
 
         payload = {
             "model": self._model,
-            "temperature": 0.2,
+            "temperature": self._temperature,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -218,3 +227,13 @@ def _extract_json_object(content: str) -> str:
 def _looks_like_response_format_issue(exc: LLMError) -> bool:
     message = str(exc).lower()
     return "response_format" in message or "json_object" in message or "json schema" in message
+
+
+def _extract_required_temperature(message: str) -> float | None:
+    match = re.search(r"only\s+([0-9]+(?:\.[0-9]+)?)\s+is allowed", message.lower())
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None

@@ -14,6 +14,7 @@ def clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "LLM_BASE_URL",
         "LLM_MODEL",
         "LLM_DISABLE_THINKING",
+        "LLM_TEMPERATURE",
         "LLM_TIMEOUT_SECONDS",
         "LOG_LEVEL",
         "ALBUM_COLLECT_WINDOW_SECONDS",
@@ -42,6 +43,7 @@ def test_load_settings_reads_required_values(monkeypatch: pytest.MonkeyPatch, tm
     assert settings.allowed_user_ids == frozenset({1, 2})
     assert settings.llm_model == "model"
     assert settings.llm_disable_thinking is False
+    assert settings.llm_temperature == 0.2
 
 
 def test_load_settings_defaults_moonshot_kimi_to_thinking_disabled(
@@ -61,6 +63,7 @@ def test_load_settings_defaults_moonshot_kimi_to_thinking_disabled(
     settings = load_settings(base_dir=tmp_path)
 
     assert settings.llm_disable_thinking is True
+    assert settings.llm_temperature == 0.6
 
 
 def test_load_settings_requires_allowed_user_ids(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

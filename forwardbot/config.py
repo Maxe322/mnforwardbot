@@ -17,6 +17,7 @@ class Settings:
     llm_base_url: str
     llm_model: str
     llm_disable_thinking: bool
+    llm_temperature: float
     llm_timeout_seconds: float
     log_level: str
     album_collect_window_seconds: float
@@ -37,6 +38,10 @@ def load_settings(base_dir: Path | None = None) -> Settings:
         "LLM_DISABLE_THINKING",
         default=("moonshot.ai" in llm_base_url and llm_model == "kimi-k2.5"),
     )
+    llm_temperature = _parse_float(
+        "LLM_TEMPERATURE",
+        0.6 if ("moonshot.ai" in llm_base_url and llm_model == "kimi-k2.5") else 0.2,
+    )
     llm_timeout_seconds = _parse_float("LLM_TIMEOUT_SECONDS", 45.0)
     album_collect_window_seconds = _parse_float("ALBUM_COLLECT_WINDOW_SECONDS", 1.2)
     telegram_caption_limit = _parse_int("TELEGRAM_CAPTION_LIMIT", 950)
@@ -53,6 +58,7 @@ def load_settings(base_dir: Path | None = None) -> Settings:
         llm_base_url=llm_base_url,
         llm_model=llm_model,
         llm_disable_thinking=llm_disable_thinking,
+        llm_temperature=llm_temperature,
         llm_timeout_seconds=llm_timeout_seconds,
         log_level=log_level,
         album_collect_window_seconds=album_collect_window_seconds,
