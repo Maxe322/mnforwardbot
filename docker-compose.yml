@@ -1,0 +1,9 @@
+services:
+  mn-forwardbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mn-forwardbot
+    restart: unless-stopped
+    env_file:
+      - .env
