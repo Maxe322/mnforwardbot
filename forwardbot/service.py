@@ -13,6 +13,21 @@ _ELLIPSIS_RE = re.compile(r"(?:\.{3,}|\u2026+)")
 _UPPER_LABEL_RE = re.compile(r"^(?:[A-Z]{2,20}|BIG|BREAKING|UPDATE|EIL|EILMELDUNG)\s*:\s*")
 _HEADLINE_SPLIT_RE = re.compile(r"\s*(?:[\u2014\u2013:;]|\s-\s|\s\|\s)\s*")
 _PREFIX_SYMBOL_RE = re.compile(r"^[\U0001F1E6-\U0001F1FF\U0001F300-\U0001FAFF\u2600-\u27BF\s]+")
+_GENERIC_HEADLINES = {
+    "geheime entscheidung",
+    "entscheidung",
+    "update",
+    "lageupdate",
+    "eilmeldung",
+    "breaking",
+    "wichtig",
+    "alarm",
+    "sensation",
+}
+_GENERIC_HEADLINE_PREFIX_RE = re.compile(
+    r"^(?:(?:geheime entscheidung|entscheidung|update|lageupdate|eilmeldung|breaking|wichtig|alarm|sensation)\s*[:\-]\s*)+",
+    re.IGNORECASE,
+)
 
 
 class RewriteService:
@@ -119,6 +134,8 @@ def _title_needs_rewrite(title: str | None) -> bool:
     plain = _strip_prefix_symbols(normalized)
     if len(plain) < 10:
         return True
+    if plain.casefold() in _GENERIC_HEADLINES:
+        return True
     if _ELLIPSIS_RE.search(normalized):
         return True
     if len(normalized) > 110:
@@ -136,6 +153,7 @@ def _build_headline(text: str, fallback_title: str | None = None, limit: int = 9
     prefix = _extract_prefix_symbols(fallback_title or normalized)
     body = _strip_prefix_symbols(normalized)
     body = _UPPER_LABEL_RE.sub("", body).strip()
+    body = _GENERIC_HEADLINE_PREFIX_RE.sub("", body).strip()
 
     sentences = _split_sentences(body[:500])
     first_sentence = sentences[0] if sentences else body

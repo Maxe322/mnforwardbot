@@ -64,7 +64,11 @@ class OpenAICompatibleProvider:
         except LLMError as exc:
             retry_temperature = _extract_required_temperature(str(exc))
             if retry_temperature is not None:
-                logger.warning("Provider rejected temperature %.2f, retrying with required temperature %.2f.", self._temperature, retry_temperature)
+                logger.warning(
+                    "Provider rejected temperature %.2f, retrying with required temperature %.2f.",
+                    self._temperature,
+                    retry_temperature,
+                )
                 payload = payload | {"temperature": retry_temperature}
                 response_data = await self._post_chat_completion(payload | {"response_format": {"type": "json_object"}})
             elif not _looks_like_response_format_issue(exc):
@@ -132,14 +136,20 @@ def _build_system_prompt(style_context: StyleContext) -> str:
         "Deine Aufgabe ist es, fremdsprachige oder rohe Quellposts in einen sendefertigen deutschen Entwurf "
         "im Stil des Zielkanals umzuschreiben.\n\n"
         "Pflichtregeln:\n"
-        "- Antworte ausschließlich als JSON-Objekt.\n"
-        "- Erfinde keine Fakten und ergänze nichts, was nicht aus dem Quelltext hervorgeht.\n"
+        "- Antworte ausschliesslich als JSON-Objekt.\n"
+        "- Erfinde keine Fakten und ergaenze nichts, was nicht aus dem Quelltext hervorgeht.\n"
         "- Gib niemals Footer, Abo-Hinweise oder Hashtags aus.\n"
         "- Verwende kein Markdown und kein HTML in title oder paragraphs.\n"
-        "- short_mode=true nur dann, wenn der Beitrag so kurz ist, dass kein Titel und keine getrennten Absätze sinnvoll sind.\n"
+        "- short_mode=true nur dann, wenn der Beitrag so kurz ist, dass kein Titel und keine getrennten Absaetze sinnvoll sind.\n"
         "- Wenn short_mode=true, muss title null sein und paragraphs genau einen kompakten Textblock enthalten.\n"
-        "- Wenn short_mode=false, enthält title die komplette Titelzeile inklusive Flaggen/Leit-Emoji, paragraphs enthält 1 bis 4 kurze Absätze.\n"
-        "- Emojis in den Absätzen nur sparsam einsetzen.\n"
+        "- Wenn short_mode=false, enthaelt title die komplette Titelzeile inklusive Flaggen/Leit-Emoji, paragraphs enthaelt 1 bis 4 kurze Absaetze.\n"
+        "- Der title muss eine eigenstaendige, konkrete Headline sein und darf kein kompletter Absatz sein.\n"
+        "- Der title muss das eigentliche Ereignis benennen und darf kein leerer Platzhalter wie 'Geheime Entscheidung', 'Update' oder 'Eilmeldung' sein.\n"
+        "- Der title darf nicht mit ... oder ... enden.\n"
+        "- Der title soll nach den Flaggen moeglichst zwischen 35 und 90 Zeichen lang sein.\n"
+        "- Flaggen duerfen nur im title stehen, nicht erneut am Anfang des ersten Absatzes.\n"
+        "- Der erste Absatz darf den title nicht wiederholen und soll direkt mit den neuen Informationen beginnen.\n"
+        "- Emojis in den Absaetzen nur sparsam einsetzen.\n"
         "- Halte dich an die Zeichenbegrenzung aus dem Nutzerprompt.\n\n"
         "JSON-Schema:\n"
         "{\n"
@@ -163,7 +173,7 @@ def _build_user_prompt(post: IncomingPost, *, max_output_chars: int) -> str:
     }
     return (
         "Formatiere den folgenden Quellpost als deutschen Kanalentwurf.\n"
-        "Wichtig: Für Medienposts muss die Ausgabe so kurz bleiben, dass sie sicher als Telegram-Caption passt.\n"
+        "Wichtig: Fuer Medienposts muss die Ausgabe so kurz bleiben, dass sie sicher als Telegram-Caption passt.\n"
         "Liefere nur JSON.\n\n"
         f"{json.dumps(source_payload, ensure_ascii=False, indent=2)}"
     )

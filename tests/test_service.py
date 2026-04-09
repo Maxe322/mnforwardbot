@@ -47,7 +47,8 @@ def test_long_single_paragraph_gets_split() -> None:
     normalized = _normalize_structure(post, draft)
 
     assert normalized.short_mode is False
-    assert normalized.title == "\U0001F1FA\U0001F1F8\U0001F1EE\U0001F1F7 Lageupdate"
+    assert normalized.title is not None
+    assert normalized.title != "\U0001F1FA\U0001F1F8\U0001F1EE\U0001F1F7 Lageupdate"
     assert len(normalized.paragraphs) >= 2
 
 
@@ -91,6 +92,30 @@ def test_bad_generated_title_gets_repaired() -> None:
     assert "..." not in normalized.title
     assert "\u2026" not in normalized.title
     assert len(normalized.title) <= 100
+
+
+def test_generic_title_gets_repaired() -> None:
+    post = IncomingPost(
+        sender_user_id=1,
+        chat_id=1,
+        source_text=(
+            "Israels Kabinett hat waehrend des Kriegs heimlich 34 neue Siedlungen im Westjordanland genehmigt. "
+            "Die Gesamtzahl steigt damit von 69 auf 103."
+        ),
+    )
+    draft = RewriteDraft(
+        short_mode=False,
+        title="\U0001F1EE\U0001F1F1\U0001F1F5\U0001F1F8 Geheime Entscheidung",
+        paragraphs=(
+            "\U0001F1EE\U0001F1F1\U0001F1F5\U0001F1F8 Geheime Entscheidung: Israels Kabinett hat heimlich 34 neue Siedlungen genehmigt.",
+            "Damit steigt die Gesamtzahl von 69 auf 103.",
+        ),
+    )
+
+    normalized = _normalize_structure(post, draft)
+
+    assert normalized.title is not None
+    assert "Geheime Entscheidung" not in normalized.title
 
 
 def test_duplicate_title_prefix_is_removed_from_first_paragraph() -> None:
