@@ -91,3 +91,28 @@ def test_bad_generated_title_gets_repaired() -> None:
     assert "..." not in normalized.title
     assert "\u2026" not in normalized.title
     assert len(normalized.title) <= 100
+
+
+def test_duplicate_title_prefix_is_removed_from_first_paragraph() -> None:
+    post = IncomingPost(
+        sender_user_id=1,
+        chat_id=1,
+        source_text=(
+            "Trump soll Netanyahu gruennes Licht fuer weitere Angriffe auf den Libanon gegeben haben. "
+            "Laut Journalist Barak Ravid soll Trump gesagt haben, Israel koenne in Libanon weitermachen."
+        ),
+    )
+    draft = RewriteDraft(
+        short_mode=False,
+        title="\U0001F1FA\U0001F1F8\U0001F1EE\U0001F1F1\U0001F1F1\U0001F1E7 Trump soll Netanyahu gruennes Licht fuer weitere Angriffe auf den Libanon gegeben haben",
+        paragraphs=(
+            "\U0001F1FA\U0001F1F8\U0001F1EE\U0001F1F1\U0001F1F1\U0001F1E7 Trump soll Netanyahu gruennes Licht fuer weitere Angriffe auf den Libanon gegeben haben - direkt nach Verkuendung des eigenen Waffenstillstands.",
+            "Laut Journalist Barak Ravid soll Trump gesagt haben: Israel koenne in Libanon weitermachen.",
+        ),
+    )
+
+    normalized = _normalize_structure(post, draft)
+
+    assert normalized.title == draft.title
+    assert normalized.paragraphs[0].startswith("direkt nach Verkuendung")
+    assert "\U0001F1FA\U0001F1F8\U0001F1EE\U0001F1F1\U0001F1F1\U0001F1E7" not in normalized.paragraphs[0]

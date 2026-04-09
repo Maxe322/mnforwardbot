@@ -52,6 +52,11 @@ def _normalize_structure(post: IncomingPost, draft: RewriteDraft) -> RewriteDraf
         if should_split and len(split_paragraphs) >= 2:
             return RewriteDraft(short_mode=False, title=draft.title, paragraphs=tuple(split_paragraphs))
 
+    if not draft.short_mode and draft.title:
+        deduped_paragraphs = _dedupe_title_from_paragraphs(draft.title, draft.paragraphs)
+        if deduped_paragraphs != draft.paragraphs:
+            return RewriteDraft(short_mode=False, title=draft.title, paragraphs=deduped_paragraphs)
+
     return draft
 
 
@@ -224,3 +229,47 @@ def _strip_prefix_symbols(text: str) -> str:
 
 def _strip_title_punctuation(text: str) -> str:
     return text.strip().strip(" .,!?;:-\u2013\u2014")
+
+
+def _dedupe_title_from_paragraphs(title: str, paragraphs: tuple[str, ...]) -> tuple[str, ...]:
+    if not paragraphs:
+        return paragraphs
+
+    first = paragraphs[0].strip()
+    remainder = _strip_title_prefix_from_paragraph(title, first)
+    if remainder == first:
+        return paragraphs
+
+    cleaned: list[str] = []
+    if remainder:
+        cleaned.append(remainder)
+    cleaned.extend(paragraph for paragraph in paragraphs[1:] if paragraph.strip())
+    return tuple(cleaned)
+
+
+def _strip_title_prefix_from_paragraph(title: str, paragraph: str) -> str:
+    title_plain = _normalize_for_compare(title)
+    paragraph_plain = _normalize_for_compare(paragraph)
+
+    if not title_plain or not paragraph_plain.startswith(title_plain):
+        return paragraph
+
+    stripped = paragraph.strip()
+    title_text = title.strip()
+
+    if stripped.startswith(title_text):
+        remainder = stripped[len(title_text) :].lstrip(" \t-–—:;,.")
+        return remainder.strip()
+
+    paragraph_body = _strip_prefix_symbols(stripped)
+    title_body = _strip_prefix_symbols(title_text)
+    if paragraph_body.startswith(title_body):
+        remainder = paragraph_body[len(title_body) :].lstrip(" \t-–—:;,.")
+        return remainder.strip()
+
+    return paragraph
+
+
+def _normalize_for_compare(text: str) -> str:
+    collapsed = re.sub(r"\s+", " ", _strip_prefix_symbols(text)).strip()
+    return _strip_title_punctuation(collapsed).casefold()
