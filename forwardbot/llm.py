@@ -21,6 +21,7 @@ class AIProvider(Protocol):
         style_context: StyleContext,
         *,
         max_output_chars: int,
+        repair_feedback: str | None = None,
     ) -> RewriteDraft: ...
 
     async def close(self) -> None: ...
@@ -53,8 +54,14 @@ class OpenAICompatibleProvider:
         style_context: StyleContext,
         *,
         max_output_chars: int,
+        repair_feedback: str | None = None,
     ) -> RewriteDraft:
-        payload = self._build_payload(post, style_context, max_output_chars=max_output_chars)
+        payload = self._build_payload(
+            post,
+            style_context,
+            max_output_chars=max_output_chars,
+            repair_feedback=repair_feedback,
+        )
         content = await self._request_completion(payload)
         return _parse_rewrite_draft(content)
 
@@ -113,9 +120,10 @@ class OpenAICompatibleProvider:
         style_context: StyleContext,
         *,
         max_output_chars: int,
+        repair_feedback: str | None,
     ) -> dict[str, Any]:
         system_prompt = _build_system_prompt(style_context)
-        user_prompt = _build_user_prompt(post, max_output_chars=max_output_chars)
+        user_prompt = _build_user_prompt(post, max_output_chars=max_output_chars, repair_feedback=repair_feedback)
 
         payload = {
             "model": self._model,
@@ -136,20 +144,21 @@ def _build_system_prompt(style_context: StyleContext) -> str:
         "Deine Aufgabe ist es, fremdsprachige oder rohe Quellposts in einen sendefertigen deutschen Entwurf "
         "im Stil des Zielkanals umzuschreiben.\n\n"
         "Pflichtregeln:\n"
-        "- Antworte ausschliesslich als JSON-Objekt.\n"
-        "- Erfinde keine Fakten und ergaenze nichts, was nicht aus dem Quelltext hervorgeht.\n"
+        "- Antworte ausschließlich als JSON-Objekt.\n"
+        "- Erfinde keine Fakten und ergänze nichts, was nicht aus dem Quelltext hervorgeht.\n"
         "- Gib niemals Footer, Abo-Hinweise oder Hashtags aus.\n"
         "- Verwende kein Markdown und kein HTML in title oder paragraphs.\n"
-        "- short_mode=true nur dann, wenn der Beitrag so kurz ist, dass kein Titel und keine getrennten Absaetze sinnvoll sind.\n"
+        "- Verwende echte Umlaute und echtes ß, niemals ae/oe/ue/ss als Ersatz in normalen deutschen Wörtern.\n"
+        "- short_mode=true nur dann, wenn der Beitrag so kurz ist, dass kein Titel und keine getrennten Absätze sinnvoll sind.\n"
         "- Wenn short_mode=true, muss title null sein und paragraphs genau einen kompakten Textblock enthalten.\n"
-        "- Wenn short_mode=false, enthaelt title die komplette Titelzeile inklusive Flaggen/Leit-Emoji, paragraphs enthaelt 1 bis 4 kurze Absaetze.\n"
-        "- Der title muss eine eigenstaendige, konkrete Headline sein und darf kein kompletter Absatz sein.\n"
+        "- Wenn short_mode=false, enthält title die komplette Titelzeile inklusive Flaggen oder Leit-Emoji, paragraphs enthält 1 bis 4 kurze Absätze.\n"
+        "- Der title ist eine vollständige, konkrete Headline und niemals ein angefangener Satz oder ein kompletter Absatz.\n"
         "- Der title muss das eigentliche Ereignis benennen und darf kein leerer Platzhalter wie 'Geheime Entscheidung', 'Update' oder 'Eilmeldung' sein.\n"
-        "- Der title darf nicht mit ... oder ... enden.\n"
-        "- Der title soll nach den Flaggen moeglichst zwischen 35 und 90 Zeichen lang sein.\n"
-        "- Flaggen duerfen nur im title stehen, nicht erneut am Anfang des ersten Absatzes.\n"
-        "- Der erste Absatz darf den title nicht wiederholen und soll direkt mit den neuen Informationen beginnen.\n"
-        "- Emojis in den Absaetzen nur sparsam einsetzen.\n"
+        "- Der title darf nicht mit '...' oder '…' enden.\n"
+        "- Der title soll nach den Flaggen möglichst zwischen 35 und 120 Zeichen lang sein.\n"
+        "- Flaggen dürfen nur im title stehen, niemals erneut am Anfang des ersten Absatzes.\n"
+        "- Der erste Absatz darf den title nicht wiederholen oder paraphrasieren und muss direkt mit neuen Informationen beginnen.\n"
+        "- Emojis in den Absätzen nur sparsam einsetzen.\n"
         "- Halte dich an die Zeichenbegrenzung aus dem Nutzerprompt.\n\n"
         "JSON-Schema:\n"
         "{\n"
@@ -162,7 +171,7 @@ def _build_system_prompt(style_context: StyleContext) -> str:
     )
 
 
-def _build_user_prompt(post: IncomingPost, *, max_output_chars: int) -> str:
+def _build_user_prompt(post: IncomingPost, *, max_output_chars: int, repair_feedback: str | None = None) -> str:
     source_payload = {
         "source_text": post.source_text,
         "source_chat_title": post.source_chat_title,
@@ -171,12 +180,21 @@ def _build_user_prompt(post: IncomingPost, *, max_output_chars: int) -> str:
         "is_album": post.is_album,
         "max_output_characters": max_output_chars,
     }
-    return (
+    prompt = (
         "Formatiere den folgenden Quellpost als deutschen Kanalentwurf.\n"
-        "Wichtig: Fuer Medienposts muss die Ausgabe so kurz bleiben, dass sie sicher als Telegram-Caption passt.\n"
+        "Wichtig: Für Medienposts muss die Ausgabe so kurz bleiben, dass sie sicher als Telegram-Caption passt.\n"
         "Liefere nur JSON.\n\n"
         f"{json.dumps(source_payload, ensure_ascii=False, indent=2)}"
     )
+
+    if repair_feedback:
+        prompt += (
+            "\n\n"
+            "Zusätzlicher Korrekturhinweis für diese Neufassung:\n"
+            f"{repair_feedback}"
+        )
+
+    return prompt
 
 
 def _extract_content(response_data: dict[str, Any]) -> str:
