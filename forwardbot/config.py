@@ -25,6 +25,13 @@ class Settings:
     telegram_message_limit: int
     style_rules_path: Path
     style_examples_path: Path
+    draft_cache_ttl_seconds: int
+    draft_cache_max_size: int
+    validator_enabled: bool
+    validator_max_missing_ignored: int
+    approved_examples_path: Path
+    approved_examples_max: int
+    rejected_examples_path: Path
 
 
 def load_settings(base_dir: Path | None = None) -> Settings:
@@ -46,10 +53,17 @@ def load_settings(base_dir: Path | None = None) -> Settings:
     album_collect_window_seconds = _parse_float("ALBUM_COLLECT_WINDOW_SECONDS", 1.2)
     telegram_caption_limit = _parse_int("TELEGRAM_CAPTION_LIMIT", 950)
     telegram_message_limit = _parse_int("TELEGRAM_MESSAGE_LIMIT", 4000)
+    draft_cache_ttl_seconds = _parse_int("DRAFT_CACHE_TTL_SECONDS", 7200)
+    draft_cache_max_size = _parse_int("DRAFT_CACHE_MAX_SIZE", 500)
+    validator_enabled = _parse_bool("VALIDATOR_ENABLED", True)
+    validator_max_missing_ignored = _parse_int("VALIDATOR_MAX_MISSING_IGNORED", 0)
+    approved_examples_max = _parse_int("APPROVED_EXAMPLES_MAX", 30)
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
 
     style_rules_path = (root / os.getenv("STYLE_RULES_PATH", "prompts/style_rules.md")).resolve()
     style_examples_path = (root / os.getenv("STYLE_EXAMPLES_PATH", "prompts/style_examples.md")).resolve()
+    approved_examples_path = (root / os.getenv("APPROVED_EXAMPLES_PATH", "data/approved_examples.jsonl")).resolve()
+    rejected_examples_path = (root / os.getenv("REJECTED_EXAMPLES_PATH", "data/rejected_examples.jsonl")).resolve()
 
     return Settings(
         telegram_bot_token=token,
@@ -66,6 +80,13 @@ def load_settings(base_dir: Path | None = None) -> Settings:
         telegram_message_limit=telegram_message_limit,
         style_rules_path=style_rules_path,
         style_examples_path=style_examples_path,
+        draft_cache_ttl_seconds=draft_cache_ttl_seconds,
+        draft_cache_max_size=draft_cache_max_size,
+        validator_enabled=validator_enabled,
+        validator_max_missing_ignored=validator_max_missing_ignored,
+        approved_examples_path=approved_examples_path,
+        approved_examples_max=approved_examples_max,
+        rejected_examples_path=rejected_examples_path,
     )
 
 

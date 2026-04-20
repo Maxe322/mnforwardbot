@@ -22,6 +22,13 @@ def clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "TELEGRAM_MESSAGE_LIMIT",
         "STYLE_RULES_PATH",
         "STYLE_EXAMPLES_PATH",
+        "DRAFT_CACHE_TTL_SECONDS",
+        "DRAFT_CACHE_MAX_SIZE",
+        "VALIDATOR_ENABLED",
+        "VALIDATOR_MAX_MISSING_IGNORED",
+        "APPROVED_EXAMPLES_PATH",
+        "APPROVED_EXAMPLES_MAX",
+        "REJECTED_EXAMPLES_PATH",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -44,6 +51,9 @@ def test_load_settings_reads_required_values(monkeypatch: pytest.MonkeyPatch, tm
     assert settings.llm_model == "model"
     assert settings.llm_disable_thinking is False
     assert settings.llm_temperature == 0.2
+    assert settings.draft_cache_ttl_seconds == 7200
+    assert settings.validator_enabled is True
+    assert settings.approved_examples_max == 30
 
 
 def test_load_settings_defaults_moonshot_kimi_to_thinking_disabled(

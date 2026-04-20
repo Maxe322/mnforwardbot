@@ -8,7 +8,8 @@ from typing import Any, Protocol
 
 import httpx
 
-from forwardbot.models import IncomingPost, LLMError, RewriteDraft, RewriteValidationError
+from forwardbot.models import IncomingPost, LLMError, RewriteDraft, RewriteResult, RewriteValidationError
+from forwardbot.prompt_modifiers import PROMPT_MODIFIERS
 from forwardbot.style_loader import StyleContext
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,32 @@ class AIProvider(Protocol):
         max_output_chars: int,
         repair_feedback: str | None = None,
     ) -> RewriteDraft: ...
+
+    async def rewrite_with_modifier(
+        self,
+        post: IncomingPost,
+        current_draft: RewriteResult,
+        style_context: StyleContext,
+        *,
+        max_output_chars: int,
+        modifier_key: str,
+    ) -> RewriteDraft: ...
+
+    async def rewrite_with_repair_hint(
+        self,
+        post: IncomingPost,
+        style_context: StyleContext,
+        *,
+        max_output_chars: int,
+        repair_hint: str,
+    ) -> RewriteDraft: ...
+
+    async def generate_headline_variants(
+        self,
+        post: IncomingPost,
+        current_draft: RewriteResult,
+        style_context: StyleContext,
+    ) -> list[str]: ...
 
     async def close(self) -> None: ...
 
@@ -56,7 +83,7 @@ class OpenAICompatibleProvider:
         max_output_chars: int,
         repair_feedback: str | None = None,
     ) -> RewriteDraft:
-        payload = self._build_payload(
+        payload = self._build_rewrite_payload(
             post,
             style_context,
             max_output_chars=max_output_chars,
@@ -64,6 +91,53 @@ class OpenAICompatibleProvider:
         )
         content = await self._request_completion(payload)
         return _parse_rewrite_draft(content)
+
+    async def rewrite_with_modifier(
+        self,
+        post: IncomingPost,
+        current_draft: RewriteResult,
+        style_context: StyleContext,
+        *,
+        max_output_chars: int,
+        modifier_key: str,
+    ) -> RewriteDraft:
+        modifier_text = PROMPT_MODIFIERS.get(modifier_key)
+        if modifier_text is None:
+            raise ValueError(f"Unsupported modifier: {modifier_key}")
+        payload = self._build_rewrite_payload(
+            post,
+            style_context,
+            max_output_chars=max_output_chars,
+            current_draft=current_draft,
+            modifier_text=modifier_text,
+        )
+        content = await self._request_completion(payload)
+        return _parse_rewrite_draft(content)
+
+    async def rewrite_with_repair_hint(
+        self,
+        post: IncomingPost,
+        style_context: StyleContext,
+        *,
+        max_output_chars: int,
+        repair_hint: str,
+    ) -> RewriteDraft:
+        return await self.rewrite(
+            post,
+            style_context,
+            max_output_chars=max_output_chars,
+            repair_feedback=repair_hint,
+        )
+
+    async def generate_headline_variants(
+        self,
+        post: IncomingPost,
+        current_draft: RewriteResult,
+        style_context: StyleContext,
+    ) -> list[str]:
+        payload = self._build_variants_payload(post, current_draft, style_context)
+        content = await self._request_completion(payload)
+        return _parse_headline_variants(content)
 
     async def _request_completion(self, payload: dict[str, Any]) -> str:
         try:
@@ -114,17 +188,37 @@ class OpenAICompatibleProvider:
         except ValueError as exc:
             raise LLMError(f"AI returned a non-JSON response: {response.text[:500]}") from exc
 
-    def _build_payload(
+    def _build_rewrite_payload(
         self,
         post: IncomingPost,
         style_context: StyleContext,
         *,
         max_output_chars: int,
-        repair_feedback: str | None,
+        repair_feedback: str | None = None,
+        current_draft: RewriteResult | None = None,
+        modifier_text: str | None = None,
     ) -> dict[str, Any]:
         system_prompt = _build_system_prompt(style_context)
-        user_prompt = _build_user_prompt(post, max_output_chars=max_output_chars, repair_feedback=repair_feedback)
+        user_prompt = _build_user_prompt(
+            post,
+            max_output_chars=max_output_chars,
+            repair_feedback=repair_feedback,
+            current_draft=current_draft,
+            modifier_text=modifier_text,
+        )
+        return self._build_payload(system_prompt=system_prompt, user_prompt=user_prompt)
 
+    def _build_variants_payload(
+        self,
+        post: IncomingPost,
+        current_draft: RewriteResult,
+        style_context: StyleContext,
+    ) -> dict[str, Any]:
+        system_prompt = _build_system_prompt(style_context)
+        user_prompt = _build_headline_variants_prompt(post, current_draft)
+        return self._build_payload(system_prompt=system_prompt, user_prompt=user_prompt)
+
+    def _build_payload(self, *, system_prompt: str, user_prompt: str) -> dict[str, Any]:
         payload = {
             "model": self._model,
             "temperature": self._temperature,
@@ -139,8 +233,8 @@ class OpenAICompatibleProvider:
 
 
 def _build_system_prompt(style_context: StyleContext) -> str:
-    return (
-        "Du bist ein deutscher Telegram-News-Redakteur.\n"
+    sections = [
+        "Du bist ein deutscher Telegram-News-Redakteur.",
         "Deine Aufgabe ist es, fremdsprachige oder rohe Quellposts in einen sendefertigen deutschen Entwurf "
         "im Stil des Zielkanals umzuschreiben.\n\n"
         "Pflichtregeln:\n"
@@ -166,12 +260,22 @@ def _build_system_prompt(style_context: StyleContext) -> str:
         '  "title": null,\n'
         '  "paragraphs": ["..."]\n'
         "}\n\n"
-        f"Stilregeln:\n{style_context.rules}\n\n"
-        f"Beispielposts:\n{style_context.examples}"
-    )
+        f"Stilregeln:\n{style_context.rules}",
+        f"## Kanon-Stilbeispiele\n{style_context.examples}",
+    ]
+    if style_context.approved_examples:
+        sections.append(f"## Zuletzt vom Redakteur freigegebene Beispiele\n{style_context.approved_examples}")
+    return "\n\n".join(section for section in sections if section)
 
 
-def _build_user_prompt(post: IncomingPost, *, max_output_chars: int, repair_feedback: str | None = None) -> str:
+def _build_user_prompt(
+    post: IncomingPost,
+    *,
+    max_output_chars: int,
+    repair_feedback: str | None = None,
+    current_draft: RewriteResult | None = None,
+    modifier_text: str | None = None,
+) -> str:
     source_payload = {
         "source_text": post.source_text,
         "source_chat_title": post.source_chat_title,
@@ -180,21 +284,51 @@ def _build_user_prompt(post: IncomingPost, *, max_output_chars: int, repair_feed
         "is_album": post.is_album,
         "max_output_characters": max_output_chars,
     }
-    prompt = (
-        "Formatiere den folgenden Quellpost als deutschen Kanalentwurf.\n"
-        "Wichtig: Für Medienposts muss die Ausgabe so kurz bleiben, dass sie sicher als Telegram-Caption passt.\n"
-        "Liefere nur JSON.\n\n"
-        f"{json.dumps(source_payload, ensure_ascii=False, indent=2)}"
-    )
+    blocks = [
+        "Formatiere den folgenden Quellpost als deutschen Kanalentwurf.",
+        "Wichtig: Für Medienposts muss die Ausgabe so kurz bleiben, dass sie sicher als Telegram-Caption passt.",
+        "Liefere nur JSON.",
+        json.dumps(source_payload, ensure_ascii=False, indent=2),
+    ]
+
+    if current_draft is not None:
+        blocks.append("Hier ist der bisherige Entwurf:")
+        blocks.append(_serialize_current_draft(current_draft))
+
+    if modifier_text:
+        blocks.append(f"Zusätzliche Arbeitsanweisung:\n{modifier_text}")
 
     if repair_feedback:
-        prompt += (
-            "\n\n"
-            "Zusätzlicher Korrekturhinweis für diese Neufassung:\n"
-            f"{repair_feedback}"
-        )
+        blocks.append(f"Zusätzlicher Korrekturhinweis für diese Neufassung:\n{repair_feedback}")
 
-    return prompt
+    return "\n\n".join(blocks)
+
+
+def _build_headline_variants_prompt(post: IncomingPost, current_draft: RewriteResult) -> str:
+    source_payload = {
+        "source_text": post.source_text,
+        "source_chat_title": post.source_chat_title,
+        "forwarded": post.forwarded,
+        "has_media": post.has_media,
+        "is_album": post.is_album,
+    }
+    return (
+        "Liefere NUR 3 alternative Titel-Vorschläge als JSON im Format "
+        '{"variants": ["titel 1", "titel 2", "titel 3"]}. '
+        "Keine Paragraphen, keine Zusätze.\n\n"
+        f"{json.dumps(source_payload, ensure_ascii=False, indent=2)}\n\n"
+        "Bisheriger Entwurf:\n"
+        f"{_serialize_current_draft(current_draft)}"
+    )
+
+
+def _serialize_current_draft(current_draft: RewriteResult) -> str:
+    payload = {
+        "title": current_draft.title,
+        "paragraphs": list(current_draft.paragraphs),
+        "short_mode": current_draft.short_mode,
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 def _extract_content(response_data: dict[str, Any]) -> str:
@@ -237,6 +371,23 @@ def _parse_rewrite_draft(content: str) -> RewriteDraft:
     if title is None or not str(title).strip():
         raise RewriteValidationError("Long-form rewrite requires a non-empty title.")
     return RewriteDraft(short_mode=False, title=str(title).strip(), paragraphs=cleaned)
+
+
+def _parse_headline_variants(content: str) -> list[str]:
+    raw_json = _extract_json_object(content)
+    try:
+        payload = json.loads(raw_json)
+    except json.JSONDecodeError as exc:
+        raise RewriteValidationError("AI returned invalid JSON for headline variants.") from exc
+
+    variants = payload.get("variants")
+    if not isinstance(variants, list) or not all(isinstance(item, str) for item in variants):
+        raise RewriteValidationError("AI field 'variants' must be a list of strings.")
+
+    cleaned = [item.strip() for item in variants if item and item.strip()]
+    if not cleaned:
+        raise RewriteValidationError("AI must return at least one headline variant.")
+    return cleaned[:3]
 
 
 def _extract_json_object(content: str) -> str:

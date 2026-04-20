@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 
 from forwardbot.config import Settings
@@ -7,6 +8,9 @@ from forwardbot.llm import AIProvider
 from forwardbot.models import IncomingPost, RewriteDraft, RewriteResult
 from forwardbot.rendering import render_rewrite
 from forwardbot.style_loader import StyleRepository
+from forwardbot.validator import validate_consistency
+
+logger = logging.getLogger(__name__)
 
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 _ELLIPSIS_RE = re.compile(r"(?:\.{3,}|\u2026+)")
@@ -105,23 +109,109 @@ class RewriteService:
 
     async def rewrite(self, post: IncomingPost) -> RewriteResult:
         style_context = self._style_repository.load()
-        max_chars = self._settings.telegram_caption_limit if post.has_media else self._settings.telegram_message_limit
-
+        max_chars = self._max_output_chars(post)
         draft = await self._provider.rewrite(post, style_context, max_output_chars=max_chars)
-        draft = _normalize_structure(post, draft)
+        return await self._finalize_result(post, draft, style_context, max_chars=max_chars)
 
-        quality_issues = _collect_quality_issues(draft)
-        if quality_issues:
-            repair_feedback = _build_repair_feedback(quality_issues)
-            draft = await self._provider.rewrite(
+    async def rewrite_with_modifier(
+        self,
+        post: IncomingPost,
+        current_result: RewriteResult,
+        modifier_key: str,
+    ) -> RewriteResult:
+        style_context = self._style_repository.load()
+        max_chars = self._max_output_chars(post)
+        draft = await self._provider.rewrite_with_modifier(
+            post,
+            current_result,
+            style_context,
+            max_output_chars=max_chars,
+            modifier_key=modifier_key,
+        )
+        return await self._finalize_result(post, draft, style_context, max_chars=max_chars)
+
+    async def generate_headline_variants(
+        self,
+        post: IncomingPost,
+        current_result: RewriteResult,
+    ) -> list[str]:
+        style_context = self._style_repository.load()
+        return await self._provider.generate_headline_variants(post, current_result, style_context)
+
+    def apply_headline_variant(
+        self,
+        post: IncomingPost,
+        current_result: RewriteResult,
+        title: str,
+    ) -> RewriteResult:
+        max_chars = self._max_output_chars(post)
+        draft = RewriteDraft(
+            short_mode=False,
+            title=title,
+            paragraphs=current_result.paragraphs,
+        )
+        normalized = _normalize_structure(post, draft)
+        return render_rewrite(normalized, max_plain_text_chars=max_chars)
+
+    def _max_output_chars(self, post: IncomingPost) -> int:
+        return self._settings.telegram_caption_limit if post.has_media else self._settings.telegram_message_limit
+
+    async def _finalize_result(
+        self,
+        post: IncomingPost,
+        draft: RewriteDraft,
+        style_context,
+        *,
+        max_chars: int,
+    ) -> RewriteResult:
+        normalized = _normalize_structure(post, draft)
+
+        repair_feedback, missing_before_repair = self._build_repair_feedback(post, normalized)
+        if repair_feedback:
+            normalized = await self._provider.rewrite_with_repair_hint(
                 post,
                 style_context,
                 max_output_chars=max_chars,
-                repair_feedback=repair_feedback,
+                repair_hint=repair_feedback,
             )
-            draft = _normalize_structure(post, draft)
+            normalized = _normalize_structure(post, normalized)
+            if self._settings.validator_enabled:
+                still_missing = self._missing_entities(post, normalized)
+                if still_missing:
+                    logger.warning("consistency: missing entities after repair: %s", still_missing)
+        elif missing_before_repair:
+            logger.warning("consistency: missing entities without repair: %s", missing_before_repair)
 
-        return render_rewrite(draft, max_plain_text_chars=max_chars)
+        return render_rewrite(normalized, max_plain_text_chars=max_chars)
+
+    def _build_repair_feedback(self, post: IncomingPost, draft: RewriteDraft) -> tuple[str | None, list[str]]:
+        quality_issues = _collect_quality_issues(draft)
+        missing_entities = self._missing_entities(post, draft) if self._settings.validator_enabled else []
+
+        feedback_blocks: list[str] = []
+        if quality_issues:
+            bullets = "\n".join(f"- {issue}" for issue in quality_issues)
+            feedback_blocks.append(
+                "Dein letzter Entwurf verletzt noch Formatregeln. "
+                "Schreibe den kompletten Post neu und korrigiere dabei besonders diese Punkte:\n"
+                f"{bullets}"
+            )
+        if missing_entities:
+            feedback_blocks.append(
+                "Dein Entwurf vermisst folgende wichtige Informationen aus dem Original: "
+                + ", ".join(missing_entities[:8])
+                + ". Liefere einen neuen Entwurf, der sie alle sinnvoll einbettet."
+            )
+
+        if not feedback_blocks:
+            return None, missing_entities
+        return "\n\n".join(feedback_blocks), missing_entities
+
+    def _missing_entities(self, post: IncomingPost, draft: RewriteDraft) -> list[str]:
+        missing = validate_consistency(post.source_text, draft)
+        if len(missing) <= self._settings.validator_max_missing_ignored:
+            return []
+        return missing
 
 
 def _normalize_structure(post: IncomingPost, draft: RewriteDraft) -> RewriteDraft:
@@ -523,12 +613,3 @@ def _collect_quality_issues(draft: RewriteDraft) -> list[str]:
         issues.append("Verwende echte Umlaute und echtes ß statt ae/oe/ue/ss.")
 
     return list(dict.fromkeys(issues))
-
-
-def _build_repair_feedback(issues: list[str]) -> str:
-    bullets = "\n".join(f"- {issue}" for issue in issues)
-    return (
-        "Dein letzter Entwurf verletzt noch Formatregeln. "
-        "Schreibe den kompletten Post neu und korrigiere dabei besonders diese Punkte:\n"
-        f"{bullets}"
-    )
